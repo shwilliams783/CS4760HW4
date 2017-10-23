@@ -17,21 +17,22 @@ struct timer
 	int ns;
 };
 
-struct message
+struct PCB
 {
+	struct timer CPUTime;
+	struct timer totalTime;
+	struct timer prevTime;
+	int priority;
 	pid_t pid;
-	int seconds;
-	int ns;
 };
 
 int errno;
 char errmsg[200];
 int shmidTime;
-int shmidMsg;
 struct timer *shmTime;
-struct message *shmMsg;
-sem_t * sem;
-sem_t * semSlaves;
+int shmidPCB;
+struct PCB *shmPCB;
+sem_t * binSem;
 /* Insert other shmid values here */
 
 
@@ -56,25 +57,23 @@ void sigIntHandler(int signum)
 		perror(errmsg);	
 	}
 
-	errno = shmdt(shmMsg);
+	errno = shmdt(shmPCB);
 	if(errno == -1)
 	{
-		snprintf(errmsg, sizeof(errmsg), "OSS: shmdt(shmMsg)");
+		snprintf(errmsg, sizeof(errmsg), "OSS: shmdt(shmPCB)");
 		perror(errmsg);	
 	}
 	
-	errno = shmctl(shmidMsg, IPC_RMID, NULL);
+	errno = shmctl(shmidPCB, IPC_RMID, NULL);
 	if(errno == -1)
 	{
-		snprintf(errmsg, sizeof(errmsg), "OSS: shmctl(shmidMsg)");
+		snprintf(errmsg, sizeof(errmsg), "OSS: shmctl(shmidPCB)");
 		perror(errmsg);	
 	}
 	
 	/* Close Semaphore */
-	sem_unlink("pSem");   
-    sem_close(sem);  
-	sem_unlink("slaveSem");
-	sem_close(semSlaves);
+	sem_unlink("binSem");   
+    sem_close(binSem);  
 	/* Exit program */
 	exit(signum);
 }
@@ -82,19 +81,19 @@ void sigIntHandler(int signum)
 int main (int argc, char *argv[]) {
 int o;
 int i;
-int maxSlaves = 5;
+int maxSlaves = 1;
 int numSlaves = 0;
 int numProc = 0;
-int maxTime = 20;
+int maxTime = 10;
 char *sParam = NULL;
 char *lParam = NULL;
 char *tParam = NULL;
 char timeArg[33];
-char msgArg[33];
+char pcbArg[33];
 pid_t pid[101] = {getpid()};
 pid_t myPid;
-key_t keyTime = 8675;
-key_t keyMsg = 1138;
+key_t keyTime = 5309;
+key_t keyPCB = 8311;
 FILE *fp;
 char *fileName = "./msglog.out";
 signal(SIGINT, sigIntHandler);
@@ -103,7 +102,7 @@ time_t stop;
 
 
 
-/* Options */
+/* Options EDIT ME LATER FOR PROJ 4 OPTIONS */
 while ((o = getopt (argc, argv, "hs:l:t:")) != -1)
 {
 	switch (o)
@@ -149,17 +148,17 @@ if(sParam != NULL)
 }
 if(maxSlaves < 0)
 {
-	maxSlaves = 5;
+	maxSlaves = 1;
 }
-if(maxSlaves > 19)
+if(maxSlaves > 18)
 {
-	maxSlaves = 19;
+	maxSlaves = 18;
 }
 
 /* Set name of log file */
 if(lParam != NULL)
 {
-	fp = fopen(lParam, "a");
+	fp = fopen(lParam, "w");
 	if(fp == NULL)
 	{
 		snprintf(errmsg, sizeof(errmsg), "OSS: fopen(lParam).");
@@ -168,7 +167,7 @@ if(lParam != NULL)
 }
 else
 {
-	fp = fopen(fileName, "a");
+	fp = fopen(fileName, "w");
 	if(fp == NULL)
 	{
 		snprintf(errmsg, sizeof(errmsg), "OSS: fopen(fileName).");
@@ -202,19 +201,19 @@ if ((void *)shmTime == (void *)-1)
 }
 
 /* Create shared memory segment for a struct message */
-shmidMsg = shmget(keyMsg, sizeof(struct message), IPC_CREAT | 0666);
-if (shmidMsg < 0)
+shmidPCB = shmget(keyPCB, sizeof(struct PCB), IPC_CREAT | 0666);
+if (shmidPCB < 0)
 {
-	snprintf(errmsg, sizeof(errmsg), "OSS: shmget(keyMsg...)");
+	snprintf(errmsg, sizeof(errmsg), "OSS: shmget(keyPCB...)");
 	perror(errmsg);
 	exit(1);
 }
 
 /* Point shmTime to shared memory */
-shmMsg = shmat(shmidMsg, NULL, 0);
-if ((void *)shmMsg == (void *)-1)
+shmPCB = shmat(shmidPCB, NULL, 0);
+if ((void *)shmPCB == (void *)-1)
 {
-	snprintf(errmsg, sizeof(errmsg), "OSS: shmat(shmidMsg)");
+	snprintf(errmsg, sizeof(errmsg), "OSS: shmat(shmidPCB)");
 	perror(errmsg);
     exit(1);
 }
@@ -223,39 +222,39 @@ if ((void *)shmMsg == (void *)-1)
 /********************INITIALIZATION********************/
 /* Convert shmTime and shmMsg keys into strings for EXEC parameters */
 sprintf(timeArg, "%d", shmidTime);
-sprintf(msgArg, "%d", shmidMsg);
+sprintf(pcbArg, "%d", shmidPCB);
 
 
 /* Set the time to 00.00 */
 shmTime->seconds = 0;
 shmTime->ns = 0;
-/* printf("shmTime->seconds = %d shmTime->ns = %d\n", shmTime->seconds, shmTime->ns); */
 
-/* Set the message to 0, 00.00 */
-shmMsg->pid = 0;
-shmMsg->seconds = 0;
-shmMsg->ns = 0;
-/* printf("shmMsg->pid = %d shmMsg->seconds = %d shmMsg->ns = %d\n", shmMsg->pid, shmMsg->seconds, shmMsg->ns); */
+/* Set the PCB array elements to 00.00, 00.00, 00.00, 0, 0 */
+for(i =0; i < 18; i++)
+{
+	shmPCB[i].CPUTime.seconds = 0;
+	shmPCB[i].CPUTime.ns = 0;
+	shmPCB[i].totalTime.seconds = 0;
+	shmPCB[i].totalTime.ns = 0;
+	shmPCB[i].prevTime.seconds = 0;
+	shmPCB[i].prevTime.ns = 0;
+	shmPCB[i].priority = 0;
+	shmPCB[i].pid = 0;
+}
 /********************END INITIALIZATION********************/
 
 /********************SEMAPHORE CREATION********************/
 /* Open Semaphore */
-sem=sem_open("pSem", O_CREAT | O_EXCL, 0644, 1);
-if(sem == SEM_FAILED) {
-	snprintf(errmsg, sizeof(errmsg), "OSS: sem_open(pSem)...");
-	perror(errmsg);
-    exit(1);
-}
-semSlaves=sem_open("slaveSem", O_CREAT | O_EXCL, 0644, maxSlaves);
-if(semSlaves == SEM_FAILED) {
-	snprintf(errmsg, sizeof(errmsg), "OSS: sem_open(slaveSem)...");
+binSem=sem_open("binSem", O_CREAT | O_EXCL, 0644, 1);
+if(binSem == SEM_FAILED) {
+	snprintf(errmsg, sizeof(errmsg), "OSS: sem_open(binSem)...");
 	perror(errmsg);
     exit(1);
 }
 /********************END SEMAPHORE CREATION********************/
 
 /* Fork off child processes */
-for(i = 0; i <= maxSlaves; i++)
+/* for(i = 0; i <= maxSlaves; i++)
 {
 	if(pid[i] != 0 && i < maxSlaves)
 	{
@@ -268,10 +267,10 @@ for(i = 0; i <= maxSlaves; i++)
 	{
 		execl("./user", "user", timeArg, msgArg, (char*)0);
 	}
-}
+} */
 
 /* Start the timer */
-start = time(NULL);
+/*start = time(NULL);
 do
 {
 	if(pid[numProc] != 0)
@@ -303,30 +302,23 @@ do
 			shmTime->ns -= 1000000000;
 			shmTime->seconds += 1;
 		}
-		/*pid = getpid();
-		snprintf(errmsg, sizeof(errmsg), "OSS: SS = %02d NS = %d, PID = %d\n", shmTime->seconds, shmTime->ns, pid);
-		printf(errmsg); */
 		stop = time(NULL);
-	}
-	/* myPid = getpid();
-	snprintf(errmsg, sizeof(errmsg), "OSS: myPid = %d numProc = %d, numSlaves = %d, maxSlaves = %d\n", myPid, numProc, numSlaves, maxSlaves);
-	printf(errmsg); */
-}while(stop-start < maxTime && shmTime->seconds < 2 && numProc < 100 + maxSlaves);
+	} */
+/* }while(stop-start < maxTime && shmTime->seconds < 2 && numProc < 100 + maxSlaves); */
 /* }while(stop-start < maxTime && numProc < 100); */
 
-if(shmTime->seconds >= 2)
+/* if(shmTime->seconds >= 2)
 {
 	snprintf(errmsg, sizeof(errmsg), "OSS: 2 simulated seconds have passed.");
 	perror(errmsg);
-}
+} */
 
 
 /* Kill all slave processes */
-for(i = 1; i <= numProc; i++)
+/* for(i = 1; i <= numProc; i++)
 {
-	/* printf("Killing process #%d\n", pid[i]); */
 	kill(pid[i], SIGINT);
-}
+} */
 /********************DEALLOCATE MEMORY********************/
 errno = shmdt(shmTime);
 if(errno == -1)
@@ -342,26 +334,25 @@ if(errno == -1)
 	perror(errmsg);	
 }
 
-errno = shmdt(shmMsg);
+errno = shmdt(shmPCB);
 if(errno == -1)
 {
-	snprintf(errmsg, sizeof(errmsg), "OSS: shmdt(shmMsg)");
+	snprintf(errmsg, sizeof(errmsg), "OSS: shmdt(shmPCB)");
 	perror(errmsg);	
 }
 
-errno = shmctl(shmidMsg, IPC_RMID, NULL);
+errno = shmctl(shmidPCB, IPC_RMID, NULL);
 if(errno == -1)
 {
-	snprintf(errmsg, sizeof(errmsg), "OSS: shmctl(shmidMsg)");
+	snprintf(errmsg, sizeof(errmsg), "OSS: shmctl(shmidPCB)");
 	perror(errmsg);	
 }
 /********************END DEALLOCATION********************/
 
 /* Close Semaphore */
-sem_unlink("pSem");   
-sem_close(sem);
-sem_unlink("slaveSem");
-sem_close(semSlaves);
+sem_unlink("binSem");   
+sem_close(binSem);
 
+printf("OSS: Program completed successfully!\n");
 return 0;
 }
