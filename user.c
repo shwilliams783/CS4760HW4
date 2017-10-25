@@ -38,7 +38,8 @@ char errmsg[100];
 struct timer *shmTime;
 struct PCB *shmPCB;
 struct schedule *shmSched;
-sem_t * binSem;
+sem_t * schedSem;
+sem_t * slaveSem;
 /* Insert other shmid values here */
 
 void sigIntHandler(int signum)
@@ -115,15 +116,28 @@ if ((void *)shmSched == (void *)-1)
 
 /********************SEMAPHORE CREATION********************/
 /* Open Semaphore */
-binSem=sem_open("binSem", 1);
-if(binSem == SEM_FAILED) {
-	snprintf(errmsg, sizeof(errmsg), "USER %d: sem_open(binSem)...", pid);
+schedSem=sem_open("schedSem", 1);
+if(schedSem == SEM_FAILED) {
+	snprintf(errmsg, sizeof(errmsg), "USER %d: sem_open(schedSem)...", pid);
+	perror(errmsg);
+    exit(1);
+}
+
+slaveSem=sem_open("slaveSem", 1);
+if(slaveSem == SEM_FAILED) {
+	snprintf(errmsg, sizeof(errmsg), "USER %d: sem_open(slaveSem)...", pid);
 	perror(errmsg);
     exit(1);
 }
 
 /********************END SEMAPHORE CREATION********************/
 
+while(shmPCB[index].pid != shmSched->pid)
+{
+	printf("%d != %d\n", shmPCB[index].pid, shmSched->pid);
+	sleep(1);
+}
+sem_wait(schedSem);
 snprintf(errmsg, sizeof(errmsg), "USER %d: Shared memory working!", shmPCB[index].pid);
 perror(errmsg);
 
@@ -140,9 +154,9 @@ if (endNS > 1000000000)
 /* printf("USER %d: endNS = %d endSec = %d\nshmTime->ns = %d shmTime->seconds = %d\n", pid, endNS, endSec, shmTime->ns, shmTime->seconds); */
 
 /* Wait for the system clock to pass the time */
-while(endSec != shmTime->seconds);
-while(endNS > shmTime->ns);
-printf("USER %d: endNS = %d endSec = %d shmTime->ns = %d shmTime->seconds = %d\n", pid, endNS, endSec, shmTime->ns, shmTime->seconds);
+/* while(endSec != shmTime->seconds); */
+/* while(endNS > shmTime->ns); */
+/* printf("USER %d: endNS = %d endSec = %d shmTime->ns = %d shmTime->seconds = %d\n", pid, endNS, endSec, shmTime->ns, shmTime->seconds); */
 
 
 /********************ENTER CRITICAL SECTION********************/
