@@ -26,11 +26,18 @@ struct PCB
 	pid_t pid;
 };
 
+struct schedule
+{
+	int quantum;
+	pid_t pid;
+};
+
 int errno;
 pid_t pid;
 char errmsg[100];
 struct timer *shmTime;
 struct PCB *shmPCB;
+struct schedule *shmSched;
 sem_t * binSem;
 /* Insert other shmid values here */
 
@@ -50,6 +57,12 @@ void sigIntHandler(int signum)
 		snprintf(errmsg, sizeof(errmsg), "USER %d: shmdt(shmPCB)", pid);
 		perror(errmsg);	
 	}
+	errno = shmdt(shmSched);
+	if(errno == -1)
+	{
+		snprintf(errmsg, sizeof(errmsg), "USER %d: shmdt(shmSched)", pid);
+		perror(errmsg);	
+	}
 	exit(signum);
 }
 
@@ -60,7 +73,8 @@ int endSec;
 int endNS;
 int timeKey = atoi(argv[1]);
 int pcbKey = atoi(argv[2]);
-int index = atoi(argv[3]);
+int schedKey = atoi(argv[3]);
+int index = atoi(argv[4]);
 signal(SIGINT, sigIntHandler);
 pid = getpid();
 
@@ -80,11 +94,20 @@ if ((void *)shmTime == (void *)-1)
     exit(1);
 }
 
-/* Point shmTime to shared memory */
+/* Point shmPCB to shared memory */
 shmPCB = shmat(pcbKey, NULL, 0);
 if ((void *)shmPCB == (void *)-1)
 {
 	snprintf(errmsg, sizeof(errmsg), "USER: shmat(shmidPCB)");
+	perror(errmsg);
+    exit(1);
+}
+
+/* Point shmSched to shared memory */
+shmSched = shmat(schedKey, NULL, 0);
+if ((void *)shmSched == (void *)-1)
+{
+	snprintf(errmsg, sizeof(errmsg), "USER: shmat(shmidSched)");
 	perror(errmsg);
     exit(1);
 }
@@ -147,6 +170,13 @@ errno = shmdt(shmPCB);
 if(errno == -1)
 {
 	snprintf(errmsg, sizeof(errmsg), "USER %d: shmdt(shmPCB)", pid);
+	perror(errmsg);	
+}
+
+errno = shmdt(shmSched);
+if(errno == -1)
+{
+	snprintf(errmsg, sizeof(errmsg), "USER %d: shmdt(shmSched)", pid);
 	perror(errmsg);	
 }
 /********************END DETACHMENT********************/
