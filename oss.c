@@ -26,12 +26,20 @@ struct PCB
 	pid_t pid;
 };
 
+struct schedule
+{
+	int quantum;
+	pid_t pid;
+};
+
 int errno;
 char errmsg[200];
 int shmidTime;
 struct timer *shmTime;
 int shmidPCB;
 struct PCB *shmPCB;
+int shmidSched;
+struct schedule *shmSched;
 sem_t * binSem;
 /* Insert other shmid values here */
 
@@ -71,6 +79,20 @@ void sigIntHandler(int signum)
 		perror(errmsg);	
 	}
 	
+	errno = shmdt(shmSched);
+	if(errno == -1)
+	{
+		snprintf(errmsg, sizeof(errmsg), "OSS: shmdt(shmSched)");
+		perror(errmsg);	
+	}
+	
+	errno = shmctl(shmidSched, IPC_RMID, NULL);
+	if(errno == -1)
+	{
+		snprintf(errmsg, sizeof(errmsg), "OSS: shmctl(shmidSched)");
+		perror(errmsg);	
+	}
+	
 	/* Close Semaphore */
 	sem_unlink("binSem");   
     sem_close(binSem);  
@@ -92,10 +114,12 @@ char *lParam = NULL;
 char *tParam = NULL;
 char timeArg[33];
 char pcbArg[33];
+char schedArg[33];
 char indexArg[33];
 pid_t pid = getpid();
 key_t keyTime = 5309;
 key_t keyPCB = 8311;
+key_t keySched = 2410;
 FILE *fp;
 char *fileName = "./msglog.out";
 signal(SIGINT, sigIntHandler);
@@ -204,8 +228,8 @@ if ((void *)shmTime == (void *)-1)
     exit(1);
 }
 
-/* Create shared memory segment for a struct message */
-shmidPCB = shmget(keyPCB, sizeof(struct PCB), IPC_CREAT | 0666);
+/* Create shared memory segment for a struct Process Control Block */
+shmidPCB = shmget(keyPCB, sizeof(struct PCB)*18, IPC_CREAT | 0666);
 if (shmidPCB < 0)
 {
 	snprintf(errmsg, sizeof(errmsg), "OSS: shmget(keyPCB...)");
@@ -213,11 +237,29 @@ if (shmidPCB < 0)
 	exit(1);
 }
 
-/* Point shmTime to shared memory */
+/* Point shmPCB to shared memory */
 shmPCB = shmat(shmidPCB, NULL, 0);
 if ((void *)shmPCB == (void *)-1)
 {
 	snprintf(errmsg, sizeof(errmsg), "OSS: shmat(shmidPCB)");
+	perror(errmsg);
+    exit(1);
+}
+
+/* Create shared memory segment for a struct Schedule */
+shmidSched = shmget(keyPCB, sizeof(struct schedule), IPC_CREAT | 0666);
+if (shmidSched < 0)
+{
+	snprintf(errmsg, sizeof(errmsg), "OSS: shmget(keySched...)");
+	perror(errmsg);
+	exit(1);
+}
+
+/* Point shmSched to shared memory */
+shmSched = shmat(shmidSched, NULL, 0);
+if ((void *)shmSched == (void *)-1)
+{
+	snprintf(errmsg, sizeof(errmsg), "OSS: shmat(shmidSched)");
 	perror(errmsg);
     exit(1);
 }
@@ -227,6 +269,7 @@ if ((void *)shmPCB == (void *)-1)
 /* Convert shmTime and shmMsg keys into strings for EXEC parameters */
 sprintf(timeArg, "%d", shmidTime);
 sprintf(pcbArg, "%d", shmidPCB);
+sprintf(schedArg, "%d", shmidSched);
 
 
 /* Set the time to 00.00 */
@@ -245,6 +288,9 @@ for(i =0; i < 18; i++)
 	shmPCB[i].priority = 0;
 	shmPCB[i].pid = 0;
 }
+
+shmSched->quantum = 0;
+shmSched->pid = 0;
 /********************END INITIALIZATION********************/
 
 /********************SEMAPHORE CREATION********************/
@@ -302,7 +348,7 @@ do
 		{
 			pid = getpid();
 			shmPCB[i].pid = pid;
-			execl("./user", "user", timeArg, pcbArg, indexArg, (char*)0);
+			execl("./user", "user", timeArg, pcbArg, schedArg, indexArg, (char*)0);
 		}
 	}
 	/* if(shmMsg->pid != 0)
@@ -370,6 +416,20 @@ errno = shmctl(shmidPCB, IPC_RMID, NULL);
 if(errno == -1)
 {
 	snprintf(errmsg, sizeof(errmsg), "OSS: shmctl(shmidPCB)");
+	perror(errmsg);	
+}
+
+errno = shmdt(shmSched);
+if(errno == -1)
+{
+	snprintf(errmsg, sizeof(errmsg), "OSS: shmdt(shmSched)");
+	perror(errmsg);	
+}
+
+errno = shmctl(shmidSched, IPC_RMID, NULL);
+if(errno == -1)
+{
+	snprintf(errmsg, sizeof(errmsg), "OSS: shmctl(shmidSched)");
 	perror(errmsg);	
 }
 /********************END DEALLOCATION********************/
