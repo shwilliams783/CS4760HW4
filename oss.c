@@ -11,6 +11,8 @@
 #include <semaphore.h>
 #include <fcntl.h>
 
+#define QUANTUM 40000
+
 struct timer
 {
 	int seconds;
@@ -40,7 +42,8 @@ int shmidPCB;
 struct PCB *shmPCB;
 int shmidSched;
 struct schedule *shmSched;
-sem_t * binSem;
+sem_t * schedSem;
+sem_t * slaveSem;
 /* Insert other shmid values here */
 
 
@@ -94,8 +97,10 @@ void sigIntHandler(int signum)
 	}
 	
 	/* Close Semaphore */
-	sem_unlink("binSem");   
-    sem_close(binSem);  
+	sem_unlink("schedSem");   
+    sem_close(schedSem);  
+	sem_unlink("slaveSem");   
+    sem_close(slaveSem);  
 	/* Exit program */
 	exit(signum);
 }
@@ -107,7 +112,7 @@ int maxSlaves = 1;
 int numSlaves = 0;
 int numProc = 0;
 int children[18] = {0};
-int maxTime = 10;
+int maxTime = 5;
 int createNext;
 char *sParam = NULL;
 char *lParam = NULL;
@@ -247,7 +252,7 @@ if ((void *)shmPCB == (void *)-1)
 }
 
 /* Create shared memory segment for a struct Schedule */
-shmidSched = shmget(keyPCB, sizeof(struct schedule), IPC_CREAT | 0666);
+shmidSched = shmget(keySched, sizeof(struct schedule), IPC_CREAT | 0666);
 if (shmidSched < 0)
 {
 	snprintf(errmsg, sizeof(errmsg), "OSS: shmget(keySched...)");
@@ -295,12 +300,21 @@ shmSched->pid = 0;
 
 /********************SEMAPHORE CREATION********************/
 /* Open Semaphore */
-binSem=sem_open("binSem", O_CREAT | O_EXCL, 0644, 1);
-if(binSem == SEM_FAILED) {
-	snprintf(errmsg, sizeof(errmsg), "OSS: sem_open(binSem)...");
+schedSem=sem_open("schedSem", O_CREAT | O_EXCL, 0644, 1);
+if(schedSem == SEM_FAILED) {
+	snprintf(errmsg, sizeof(errmsg), "OSS: sem_open(schedSem)...");
 	perror(errmsg);
     exit(1);
 }
+
+slaveSem=sem_open("slaveSem", O_CREAT | O_EXCL, 0644, maxSlaves);
+if(slaveSem == SEM_FAILED) {
+	snprintf(errmsg, sizeof(errmsg), "OSS sem_open(slaveSem)...");
+	perror(errmsg);
+	exit(1);
+}
+/* Initialize schedSem to waiting */
+sem_wait(schedSem);
 /********************END SEMAPHORE CREATION********************/
 
 /* Fork off child processes */
@@ -331,7 +345,8 @@ if(binSem == SEM_FAILED) {
 start = time(NULL);
 do
 {
-	for(i = 0; i < 18; i++)
+	/* Check the PCB for unused processes  */
+	for(i = 0; i < maxSlaves-1; ++i)
 	{
 		if(shmPCB[i].pid == 0)
 		{
@@ -339,6 +354,8 @@ do
 			break;
 		}
 	}
+	
+	/* Create a child process if the maximum number of processes isn't reached */
 	if(numSlaves < maxSlaves)
 	{
 		numSlaves += 1;
@@ -351,6 +368,12 @@ do
 			execl("./user", "user", timeArg, pcbArg, schedArg, indexArg, (char*)0);
 		}
 	}
+	
+	/* Schedule next process */
+	shmSched->quantum = QUANTUM;
+	shmSched->pid = shmPCB[i].pid;
+	/* printf("i = %d, shmSched: quantum = %d, pid = %d\n", i, shmSched->quantum, shmSched->pid); */
+	sem_post(schedSem);
 	/* if(shmMsg->pid != 0)
 	{
 		sem_wait(semSlaves);
@@ -373,9 +396,9 @@ do
 /* }while(stop-start < maxTime && shmTime->seconds < 2 && numProc < 100 + maxSlaves); */
 }while(stop-start < maxTime && numProc < 100);
 
-for(i = 0; i < 18; i++)
+for(i = 0; i < maxSlaves; i++)
 {
-	printf("children[%d] = %d\n", i, shmPCB[i].pid);
+	printf("shmPID[%d] = %d\n", i, shmPCB[i].pid);
 }
 
 /* if(shmTime->seconds >= 2)
@@ -386,10 +409,10 @@ for(i = 0; i < 18; i++)
 
 
 /* Kill all slave processes */
-/* for(i = 1; i <= numProc; i++)
+for(i = 0; i < maxSlaves; i++)
 {
-	kill(pid[i], SIGINT);
-} */
+	kill(shmPCB[i].pid, SIGINT);
+}
 /********************DEALLOCATE MEMORY********************/
 errno = shmdt(shmTime);
 if(errno == -1)
@@ -435,8 +458,10 @@ if(errno == -1)
 /********************END DEALLOCATION********************/
 
 /* Close Semaphore */
-sem_unlink("binSem");   
-sem_close(binSem);
+sem_unlink("schedSem");   
+sem_close(schedSem);
+sem_unlink("slaveSem");   
+sem_close(slaveSem);  
 
 printf("OSS: Program completed successfully!\n");
 return 0;
