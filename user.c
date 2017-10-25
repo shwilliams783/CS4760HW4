@@ -17,39 +17,37 @@ struct timer
 	int ns;
 };
 
-struct message
+struct PCB
 {
+	struct timer CPUTime;
+	struct timer totalTime;
+	struct timer prevTime;
+	int priority;
 	pid_t pid;
-	int seconds;
-	int ns;
 };
 
 int errno;
 pid_t pid;
 char errmsg[100];
 struct timer *shmTime;
-struct message *shmMsg;
-sem_t * sem;
-sem_t * semSlaves;
+struct PCB *shmPCB;
+sem_t * binSem;
 /* Insert other shmid values here */
 
 void sigIntHandler(int signum)
 {
-	
 	snprintf(errmsg, sizeof(errmsg), "USER %d: Caught SIGINT! Killing all child processes.", pid);
 	perror(errmsg);	
-	
 	errno = shmdt(shmTime);
 	if(errno == -1)
 	{
 		snprintf(errmsg, sizeof(errmsg), "USER %d: shmdt(shmTime)", pid);
 		perror(errmsg);	
 	}
-
-	errno = shmdt(shmMsg);
+	errno = shmdt(shmPCB);
 	if(errno == -1)
 	{
-		snprintf(errmsg, sizeof(errmsg), "USER %d: shmdt(shmMsg)", pid);
+		snprintf(errmsg, sizeof(errmsg), "USER %d: shmdt(shmPCB)", pid);
 		perror(errmsg);	
 	}
 	exit(signum);
@@ -61,17 +59,16 @@ int i;
 int endSec;
 int endNS;
 int timeKey = atoi(argv[1]);
-int msgKey = atoi(argv[2]);
-key_t keyTime = 8675;
-key_t keyMsg = 1138;
+int pcbKey = atoi(argv[2]);
+int index = atoi(argv[3]);
 signal(SIGINT, sigIntHandler);
 pid = getpid();
 
 /* Seed random number generator */
 srand(pid * time(NULL));
 
-/* snprintf(errmsg, sizeof(errmsg), "USER %d: Slave process started!", pid);
-perror(errmsg); */
+snprintf(errmsg, sizeof(errmsg), "USER %d: Slave process started!", pid);
+perror(errmsg);
 
 /********************MEMORY ATTACHMENT********************/
 /* Point shmTime to shared memory */
@@ -84,10 +81,10 @@ if ((void *)shmTime == (void *)-1)
 }
 
 /* Point shmTime to shared memory */
-shmMsg = shmat(msgKey, NULL, 0);
-if ((void *)shmMsg == (void *)-1)
+shmPCB = shmat(pcbKey, NULL, 0);
+if ((void *)shmPCB == (void *)-1)
 {
-	snprintf(errmsg, sizeof(errmsg), "USER: shmat(shmidMsg)");
+	snprintf(errmsg, sizeof(errmsg), "USER: shmat(shmidPCB)");
 	perror(errmsg);
     exit(1);
 }
@@ -95,23 +92,21 @@ if ((void *)shmMsg == (void *)-1)
 
 /********************SEMAPHORE CREATION********************/
 /* Open Semaphore */
-sem=sem_open("pSem", 1);
-if(sem == SEM_FAILED) {
-	snprintf(errmsg, sizeof(errmsg), "USER %d: sem_open(pSem)...", pid);
+binSem=sem_open("binSem", 1);
+if(binSem == SEM_FAILED) {
+	snprintf(errmsg, sizeof(errmsg), "USER %d: sem_open(binSem)...", pid);
 	perror(errmsg);
     exit(1);
 }
 
-semSlaves = sem_open("slaveSem", 1);
-if(semSlaves == SEM_FAILED) {
-	snprintf(errmsg, sizeof(errmsg), "USER %d: sem_open(slaveSem)...", pid);
-	perror(errmsg);
-    exit(1);
-}
 /********************END SEMAPHORE CREATION********************/
 
+snprintf(errmsg, sizeof(errmsg), "USER %d: Shared memory working!", shmPCB[index].pid);
+perror(errmsg);
+
+
 /* Calculate End Time */
-endNS = shmTime->ns + (rand()%10000) + 1;
+endNS = shmTime->ns + (rand()%1000) + 1;
 endSec = shmTime->seconds;
 if (endNS > 1000000000)
 {
@@ -124,17 +119,15 @@ if (endNS > 1000000000)
 /* Wait for the system clock to pass the time */
 while(endSec != shmTime->seconds);
 while(endNS > shmTime->ns);
-/* printf("USER %d: endNS = %d endSec = %d shmTime->ns = %d shmTime->seconds = %d\n", pid, endNS, endSec, shmTime->ns, shmTime->seconds); */
+printf("USER %d: endNS = %d endSec = %d shmTime->ns = %d shmTime->seconds = %d\n", pid, endNS, endSec, shmTime->ns, shmTime->seconds);
 
- /* Busy-Wait until oss.c clears the message */
-while(shmMsg->pid != 0);
 
 /********************ENTER CRITICAL SECTION********************/
-sem_wait(sem);	/* P operation */
-shmMsg->ns = endNS;
+/*sem_wait(sem); */	/* P operation */
+/* shmMsg->ns = endNS;
 shmMsg->seconds = endSec;
-shmMsg->pid = pid;
-sem_post(sem); /* V operation */  
+shmMsg->pid = pid; */
+/* sem_post(sem); */ /* V operation */  
 /********************EXIT CRITICAL SECTION********************/
 
 /* snprintf(errmsg, sizeof(errmsg), "USER %d: shmTime->seconds = %d shmTime->ns = %d\n", pid, shmTime->seconds, shmTime->ns);
@@ -144,23 +137,20 @@ perror(errmsg); */
 
 /********************MEMORY DETACHMENT********************/
 errno = shmdt(shmTime);
-	if(errno == -1)
-	{
-		snprintf(errmsg, sizeof(errmsg), "MASTER: shmdt(shmTime)");
-		perror(errmsg);	
-	}
+if(errno == -1)
+{
+	snprintf(errmsg, sizeof(errmsg), "MASTER: shmdt(shmTime)");
+	perror(errmsg);	
+}
 
-	errno = shmdt(shmMsg);
-	if(errno == -1)
-	{
-		snprintf(errmsg, sizeof(errmsg), "MASTER: shmdt(shmMsg)");
-		perror(errmsg);	
-	}
+errno = shmdt(shmPCB);
+if(errno == -1)
+{
+	snprintf(errmsg, sizeof(errmsg), "USER %d: shmdt(shmPCB)", pid);
+	perror(errmsg);	
+}
 /********************END DETACHMENT********************/
-
-/* Post to semSlaves */
-sem_post(semSlaves);
-/* printf("USER: Child Finished!\n"); */
+printf("USER: Child Finished!\n");
 exit(0);
 return 0;
 }
