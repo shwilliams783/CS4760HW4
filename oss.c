@@ -84,14 +84,16 @@ int i;
 int maxSlaves = 1;
 int numSlaves = 0;
 int numProc = 0;
+int children[18] = {0};
 int maxTime = 10;
+int createNext;
 char *sParam = NULL;
 char *lParam = NULL;
 char *tParam = NULL;
 char timeArg[33];
 char pcbArg[33];
-pid_t pid[101] = {getpid()};
-pid_t myPid;
+char indexArg[33];
+pid_t pid = getpid();
 key_t keyTime = 5309;
 key_t keyPCB = 8311;
 FILE *fp;
@@ -100,6 +102,8 @@ signal(SIGINT, sigIntHandler);
 time_t start;
 time_t stop;
 
+/* Seed random number generator */
+srand(pid * time(NULL));
 
 
 /* Options EDIT ME LATER FOR PROJ 4 OPTIONS */
@@ -146,7 +150,7 @@ if(sParam != NULL)
 {
 	maxSlaves = atoi(sParam);
 }
-if(maxSlaves < 0)
+if(maxSlaves <= 0)
 {
 	maxSlaves = 1;
 }
@@ -254,58 +258,79 @@ if(binSem == SEM_FAILED) {
 /********************END SEMAPHORE CREATION********************/
 
 /* Fork off child processes */
-/* for(i = 0; i <= maxSlaves; i++)
+/*for(i = 0; i <= maxSlaves; i++)
 {
-	if(pid[i] != 0 && i < maxSlaves)
+	if(pid != 0 && i < maxSlaves)
 	{
-		pid[i+1] = fork();
+		snprintf(errmsg, sizeof(errmsg), "OSS %d: About to fork!", pid);
+		perror(errmsg);
 		numSlaves++;
 		numProc++;
-		continue;
+		children[i] = 1;
+		pid = fork();
 	}
-	else if(pid[i] == 0)
+	if(pid == 0)
 	{
-		execl("./user", "user", timeArg, msgArg, (char*)0);
+		pid = getpid(); */
+		
+		/* snprintf(errmsg, sizeof(errmsg), "OSS %d: Slave process starting!", pid);
+		perror(errmsg); */
+		/* sprintf(pidArg, "%d", i); */
+		/* execl("./user", "user", timeArg, pcbArg, (char*)0);
 	}
 } */
 
+
 /* Start the timer */
-/*start = time(NULL);
+start = time(NULL);
 do
 {
-	if(pid[numProc] != 0)
+	for(i = 0; i < 18; i++)
 	{
-		if(numSlaves < maxSlaves)
+		if(shmPCB[i].pid == 0)
 		{
-			numSlaves += 1;
-			numProc += 1;
-			pid[numProc] = fork();
-			if(pid[numProc] == 0)
-			{
-				execl("./user", "user", timeArg, msgArg, (char*)0);
-			}
+			sprintf(indexArg, "%d", i);
+			break;
 		}
-		if(shmMsg->pid != 0)
+	}
+	if(numSlaves < maxSlaves)
+	{
+		numSlaves += 1;
+		numProc += 1;
+		pid = fork();
+		if(pid == 0)
 		{
-			sem_wait(semSlaves);
-			wait(shmMsg->pid);
-			snprintf(errmsg, sizeof(errmsg), "OSS: Child %d is terminating at my time %02d.%d because it reached %02d.%d in slave\n", shmMsg->pid, shmTime->seconds, shmTime->ns, shmMsg->seconds, shmMsg->ns);
-			fprintf(fp, errmsg);
-			shmMsg->ns = 0;
-			shmMsg->seconds = 0;
-			shmMsg->pid = 0;
-			numSlaves -= 1;
+			pid = getpid();
+			shmPCB[i].pid = pid;
+			execl("./user", "user", timeArg, pcbArg, indexArg, (char*)0);
 		}
-		shmTime->ns += (rand()%10000) + 1;
-		if(shmTime->ns >= 1000000000)
-		{
-			shmTime->ns -= 1000000000;
-			shmTime->seconds += 1;
-		}
-		stop = time(NULL);
+	}
+	/* if(shmMsg->pid != 0)
+	{
+		sem_wait(semSlaves);
+		wait(shmMsg->pid);
+		snprintf(errmsg, sizeof(errmsg), "OSS: Child %d is terminating at my time %02d.%d because it reached %02d.%d in slave\n", shmMsg->pid, shmTime->seconds, shmTime->ns, shmMsg->seconds, shmMsg->ns);
+		fprintf(fp, errmsg);
+		shmMsg->ns = 0;
+		shmMsg->seconds = 0;
+		shmMsg->pid = 0;
+		numSlaves -= 1;
 	} */
+	shmTime->ns += (rand()%1000) + 1;
+	if(shmTime->ns >= 1000000000)
+	{
+		shmTime->ns -= 1000000000;
+		shmTime->seconds += 1;
+	}
+	shmTime->seconds += 1;
+	stop = time(NULL);
 /* }while(stop-start < maxTime && shmTime->seconds < 2 && numProc < 100 + maxSlaves); */
-/* }while(stop-start < maxTime && numProc < 100); */
+}while(stop-start < maxTime && numProc < 100);
+
+for(i = 0; i < 18; i++)
+{
+	printf("children[%d] = %d\n", i, shmPCB[i].pid);
+}
 
 /* if(shmTime->seconds >= 2)
 {
