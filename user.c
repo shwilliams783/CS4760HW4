@@ -10,6 +10,7 @@
 #include <sys/shm.h>
 #include <semaphore.h>
 #include <fcntl.h>
+#include "queue.h"
 
 struct timer
 {
